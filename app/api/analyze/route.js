@@ -39,6 +39,13 @@ export async function POST(request) {
       );
     }
 
+    if (images.length > 4) {
+      return Response.json(
+        { error: "Please analyze 4 photos or fewer at a time." },
+        { status: 400 }
+      );
+    }
+
     const imageContent = [];
 
     for (const image of images) {
@@ -48,7 +55,7 @@ export async function POST(request) {
 
       imageContent.push({
         type: "input_image",
-        image_url: `data:${image.type};base64,${base64Image}`,
+        image_url: `data:image/jpeg;base64,${base64Image}`,
       });
     }
 

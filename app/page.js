@@ -2,6 +2,51 @@
 
 import { useState } from "react";
 
+async function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const maxWidth = 1200;
+      const scale = Math.min(1, maxWidth / img.width);
+
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(
+        (blob) => {
+          URL.revokeObjectURL(url);
+
+          if (!blob) {
+            reject(new Error("Image compression failed."));
+            return;
+          }
+
+          const compressedFile = new File([blob], "scan.jpg", {
+            type: "image/jpeg",
+          });
+
+          resolve(compressedFile);
+        },
+        "image/jpeg",
+        0.75
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not load image."));
+    };
+
+    img.src = url;
+  });
+}
+
 export default function Home() {
   const [images, setImages] = useState([]);
   const [ingredients, setIngredients] = useState([]);
@@ -10,19 +55,26 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleUpload = (event) => {
+  const handleUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const preview = URL.createObjectURL(file);
+    setError("");
 
-    setImages((prev) => [
-      ...prev,
-      {
-        file,
-        preview,
-      },
-    ]);
+    try {
+      const compressedFile = await compressImage(file);
+      const preview = URL.createObjectURL(compressedFile);
+
+      setImages((prev) => [
+        ...prev,
+        {
+          file: compressedFile,
+          preview,
+        },
+      ]);
+    } catch (err) {
+      setError(err.message || "Could not add photo.");
+    }
 
     event.target.value = "";
   };
@@ -30,6 +82,7 @@ export default function Home() {
   const removePhoto = (indexToRemove) => {
     setImages((prev) => {
       const imageToRemove = prev[indexToRemove];
+
       if (imageToRemove?.preview) {
         URL.revokeObjectURL(imageToRemove.preview);
       }
@@ -96,8 +149,8 @@ export default function Home() {
         </h1>
 
         <p className="text-zinc-300 text-xl leading-relaxed mb-8">
-          Scan your fridge, pantry, freezer, or counter. Save multiple photos,
-          then analyze your whole kitchen at once.
+          Add fridge, pantry, freezer, or counter scans first. Then analyze your
+          whole kitchen together.
         </p>
 
         <div className="bg-zinc-950/80 border border-zinc-800 rounded-3xl p-6 mb-8 shadow-2xl">
@@ -106,7 +159,7 @@ export default function Home() {
               <h2 className="text-2xl font-bold">Kitchen scans</h2>
               <p className="text-zinc-400">
                 {images.length === 0
-                  ? "No scans yet"
+                  ? "Add photos before analyzing"
                   : `${images.length} scan${images.length > 1 ? "s" : ""} saved`}
               </p>
             </div>
@@ -116,7 +169,7 @@ export default function Home() {
                 onClick={clearKitchen}
                 className="text-red-300 border border-red-500/40 bg-red-500/10 px-4 py-2 rounded-xl font-bold"
               >
-                Clear
+                Start over
               </button>
             )}
           </div>
@@ -131,7 +184,6 @@ export default function Home() {
                 capture="environment"
                 className="hidden"
                 onChange={handleUpload}
-                disabled={loading}
               />
             </label>
 
@@ -180,7 +232,8 @@ export default function Home() {
               <h2 className="text-2xl font-bold">Analyzing your kitchen...</h2>
             </div>
             <p className="text-zinc-300">
-              Combining photos, reading labels, and ranking realistic meal ideas.
+              Combining saved scans, reading labels, and ranking realistic meal
+              ideas.
             </p>
           </div>
         )}
