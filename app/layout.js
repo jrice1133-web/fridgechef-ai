@@ -12,9 +12,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "FridgeChef AI — Smart meal ideas from your fridge",
-  description:
-    "Scan your fridge or pantry and get ranked, creative meal ideas based on what you already have.",
+  title: "FridgeChef AI",
+  description: "Turn your fridge into dinner.",
 };
 
 export default function RootLayout({ children }) {
@@ -23,7 +22,9 @@ export default function RootLayout({ children }) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col bg-zinc-950 text-white">
+        {children}
+      </body>
     </html>
   );
 }

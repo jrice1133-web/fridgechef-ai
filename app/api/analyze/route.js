@@ -1,39 +1,17 @@
 import OpenAI from "openai";
-import { ANALYZE_VISION_PROMPT } from "@/lib/prompts/analyze";
-import { parseModelJson } from "@/lib/analysis/parse-json";
-import { normalizeAnalysisResponse } from "@/lib/analysis/normalize";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-
 export async function POST(request) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return Response.json(
-        { error: "Scanning is temporarily unavailable. Please try again later." },
-        { status: 503 }
-      );
-    }
-
     const formData = await request.formData();
     const image = formData.get("image");
 
-    if (!image || typeof image.arrayBuffer !== "function") {
+    if (!image) {
       return Response.json(
-        { error: "Please upload a photo of your fridge or pantry." },
-        { status: 400 }
-      );
-    }
-
-    if (image.size > MAX_IMAGE_BYTES) {
-      return Response.json(
-        {
-          error:
-            "That photo is too large. Try a closer shot or allow the app to compress it and scan again.",
-        },
+        { error: "No image uploaded." },
         { status: 400 }
       );
     }
@@ -41,7 +19,6 @@ export async function POST(request) {
     const bytes = await image.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64Image = buffer.toString("base64");
-    const mimeType = image.type || "image/jpeg";
 
     const response = await client.responses.create({
       model: "gpt-4.1-mini",
@@ -51,30 +28,48 @@ export async function POST(request) {
           content: [
             {
               type: "input_text",
-              text: ANALYZE_VISION_PROMPT,
+              text: `Look at this kitchen/fridge/pantry photo. Identify visible food ingredients only. Then suggest 3 realistic meals the user can make mostly from those ingredients.
+
+Return ONLY valid JSON in this exact format:
+{
+  "ingredients": [
+    { "name": "ingredient name", "confidence": "high" },
+    { "name": "possible ingredient", "confidence": "low" }
+  ],
+  "meals": [
+    {
+      "name": "Meal name",
+      "time": "15 min",
+      "difficulty": "Easy",
+      "matchScore": 85,
+      "description": "Short appetizing description",
+      "ingredientsUsed": ["ingredient 1", "ingredient 2"],
+      "missingOptional": ["salt", "pepper"],
+      "steps": ["Step 1 instruction", "Step 2 instruction"]
+    }
+  ]
+}
+
+Use confidence "high" for clearly visible items, "medium" for likely items, "low" for uncertain guesses. matchScore is 0-100 for how well the meal fits detected ingredients. difficulty is Easy, Medium, or Hard.`
             },
             {
               type: "input_image",
-              image_url: `data:${mimeType};base64,${base64Image}`,
-            },
-          ],
-        },
-      ],
+              image_url: `data:${image.type};base64,${base64Image}`
+            }
+          ]
+        }
+      ]
     });
 
     const text = response.output_text;
-    const parsed = parseModelJson(text);
-    const data = normalizeAnalysisResponse(parsed);
+    const data = JSON.parse(text);
 
     return Response.json(data);
   } catch (error) {
-    console.error("Analyze error:", error);
+    console.error(error);
 
     return Response.json(
-      {
-        error:
-          "We couldn't scan this photo. Try a brighter, closer shot with labels facing the camera.",
-      },
+      { error: "Failed to analyze image." },
       { status: 500 }
     );
   }
