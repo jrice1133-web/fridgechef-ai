@@ -13,7 +13,8 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   title: "FridgeChef AI",
-  description: "Scan your fridge and get AI meal ideas",
+  description:
+    "Scan your fridge or pantry and get AI-generated meal ideas from what you have.",
 };
 
 export default function RootLayout({ children }) {

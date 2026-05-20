@@ -1,26 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function Home() {
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [error, setError] = useState(null);
+
   const [detectedIngredients, setDetectedIngredients] = useState([]);
   const [meals, setMeals] = useState([]);
+
+  const imageUrlRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (imageUrlRef.current) {
+        URL.revokeObjectURL(imageUrlRef.current);
+      }
+    };
+  }, []);
 
   const handleImageUpload = async (event) => {
     const file = event.target.files?.[0];
 
     if (!file) return;
 
-    setImage(URL.createObjectURL(file));
+    if (imageUrlRef.current) {
+      URL.revokeObjectURL(imageUrlRef.current);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    imageUrlRef.current = previewUrl;
+
+    setImage(previewUrl);
     setLoading(true);
     setShowResults(false);
     setError(null);
-    setDetectedIngredients([]);
-    setMeals([]);
 
     const formData = new FormData();
     formData.append("image", file);
@@ -40,9 +56,13 @@ export default function Home() {
       setDetectedIngredients(data.ingredients || []);
       setMeals(data.meals || []);
       setShowResults(true);
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "AI scan failed. Please try again.");
+    } catch (uploadError) {
+      console.error(uploadError);
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "AI scan failed."
+      );
     } finally {
       setLoading(false);
       event.target.value = "";
@@ -63,16 +83,33 @@ export default function Home() {
           instantly.
         </p>
 
-        <label className="bg-green-500 text-black font-bold px-6 py-4 rounded-2xl inline-block cursor-pointer hover:bg-green-400 transition">
-          Scan Ingredients
+        <label
+          className={`bg-green-500 text-black font-bold px-6 py-4 rounded-2xl inline-block transition ${
+            loading
+              ? "opacity-60 cursor-not-allowed"
+              : "cursor-pointer hover:bg-green-400"
+          }`}
+        >
+          {loading ? "Scanning..." : "Scan Ingredients"}
+
           <input
             type="file"
             accept="image/*"
             capture="environment"
             className="hidden"
+            disabled={loading}
             onChange={handleImageUpload}
           />
         </label>
+
+        {error && (
+          <div
+            role="alert"
+            className="mt-8 bg-red-950/50 border border-red-800 text-red-200 px-5 py-4 rounded-2xl max-w-md"
+          >
+            {error}
+          </div>
+        )}
 
         {image && (
           <img
@@ -90,16 +127,10 @@ export default function Home() {
                 AI is analyzing your ingredients...
               </p>
             </div>
+
             <p className="text-zinc-400">
               Detecting foods and generating meal ideas.
             </p>
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-10 bg-red-950/50 border border-red-800 text-red-200 p-6 rounded-3xl max-w-md">
-            <p className="font-semibold mb-2">Scan failed</p>
-            <p className="text-red-300/90">{error}</p>
           </div>
         )}
 
@@ -107,12 +138,7 @@ export default function Home() {
           <div className="mt-14">
             <h2 className="text-3xl font-bold mb-5">Ingredients Detected</h2>
 
-            {detectedIngredients.length === 0 ? (
-              <p className="text-zinc-400 mb-10">
-                No ingredients were detected. Try a clearer photo of your
-                fridge or pantry.
-              </p>
-            ) : (
+            {detectedIngredients.length > 0 ? (
               <div className="flex flex-wrap gap-3 mb-10">
                 {detectedIngredients.map((item) => (
                   <div
@@ -123,15 +149,16 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            ) : (
+              <p className="text-zinc-400 mb-10">
+                No ingredients were detected. Try a clearer photo of your fridge
+                or pantry.
+              </p>
             )}
 
             <h2 className="text-3xl font-bold mb-5">Meal Ideas</h2>
 
-            {meals.length === 0 ? (
-              <p className="text-zinc-400">
-                No meal ideas were generated. Try another photo.
-              </p>
-            ) : (
+            {meals.length > 0 ? (
               <div className="grid gap-4">
                 {meals.map((meal, index) => (
                   <div
@@ -144,6 +171,11 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            ) : (
+              <p className="text-zinc-400">
+                No meal ideas were generated. Try another photo with more
+                visible ingredients.
+              </p>
             )}
           </div>
         )}
