@@ -1,47 +1,67 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { compressImageForUpload } from "@/lib/client/compress-image";
+import LoadingScanner from "@/components/scan/LoadingScanner";
+import IngredientChips from "@/components/scan/IngredientChips";
+import MealCard from "@/components/scan/MealCard";
+import ScanErrorCard from "@/components/scan/ScanErrorCard";
 
 export default function Home() {
-  const [image, setImage] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [error, setError] = useState(null);
 
-  const [detectedIngredients, setDetectedIngredients] = useState([]);
+  const [ingredients, setIngredients] = useState([]);
+  const [possibleIngredients, setPossibleIngredients] = useState([]);
   const [meals, setMeals] = useState([]);
 
-  const imageUrlRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const previewUrlRef = useRef(null);
+
+  const revokePreview = useCallback(() => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
-    return () => {
-      if (imageUrlRef.current) {
-        URL.revokeObjectURL(imageUrlRef.current);
-      }
-    };
-  }, []);
+    return () => revokePreview();
+  }, [revokePreview]);
+
+  const resetScan = () => {
+    setShowResults(false);
+    setError(null);
+    setIngredients([]);
+    setPossibleIngredients([]);
+    setMeals([]);
+    revokePreview();
+    setPreviewUrl(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const handleImageUpload = async (event) => {
     const file = event.target.files?.[0];
-
     if (!file) return;
 
-    if (imageUrlRef.current) {
-      URL.revokeObjectURL(imageUrlRef.current);
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-    imageUrlRef.current = previewUrl;
-
-    setImage(previewUrl);
-    setLoading(true);
-    setShowResults(false);
     setError(null);
+    setShowResults(false);
+    setLoading(true);
 
-    const formData = new FormData();
-    formData.append("image", file);
+    revokePreview();
+    const url = URL.createObjectURL(file);
+    previewUrlRef.current = url;
+    setPreviewUrl(url);
 
     try {
+      const compressed = await compressImageForUpload(file);
+      const formData = new FormData();
+      formData.append("image", compressed);
+
       const response = await fetch("/api/analyze", {
         method: "POST",
         body: formData,
@@ -50,133 +70,123 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "AI scan failed.");
+        setError(
+          data.error ||
+            "We couldn't scan this photo. Try a brighter, closer shot with labels facing the camera."
+        );
+        return;
       }
 
-      setDetectedIngredients(data.ingredients || []);
+      setIngredients(data.ingredients || []);
+      setPossibleIngredients(data.possibleIngredients || []);
       setMeals(data.meals || []);
       setShowResults(true);
-    } catch (uploadError) {
-      console.error(uploadError);
+    } catch {
       setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "AI scan failed."
+        "We couldn't reach the server. Check your connection and try again."
       );
     } finally {
       setLoading(false);
-      event.target.value = "";
     }
   };
 
+  const triggerRescan = () => {
+    resetScan();
+    fileInputRef.current?.click();
+  };
+
   return (
-    <main className="min-h-screen bg-zinc-950 text-white px-6 py-16">
-      <section className="max-w-5xl mx-auto">
-        <p className="text-green-400 font-semibold mb-4">AI Cooking Assistant</p>
+    <main className="min-h-screen bg-zinc-950 text-white">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-900/20 via-zinc-950 to-zinc-950" />
 
-        <h1 className="text-5xl font-bold mb-6">
-          Turn random ingredients into dinner.
-        </h1>
-
-        <p className="text-zinc-400 text-xl mb-8">
-          Scan your pantry, fridge, or kitchen and get AI-generated meal ideas
-          instantly.
+      <section className="relative mx-auto max-w-2xl px-4 py-10 sm:max-w-3xl sm:px-6 sm:py-14">
+        <p className="text-sm font-semibold uppercase tracking-widest text-emerald-400">
+          FridgeChef AI
         </p>
 
-        <label
-          className={`bg-green-500 text-black font-bold px-6 py-4 rounded-2xl inline-block transition ${
-            loading
-              ? "opacity-60 cursor-not-allowed"
-              : "cursor-pointer hover:bg-green-400"
-          }`}
-        >
-          {loading ? "Scanning..." : "Scan Ingredients"}
+        <h1 className="mt-3 text-3xl font-bold leading-tight tracking-tight sm:text-4xl sm:leading-tight">
+          Turn what&apos;s in your fridge into real dinners
+        </h1>
 
+        <p className="mt-4 text-base leading-relaxed text-zinc-400 sm:text-lg">
+          Snap your fridge or pantry. We read labels, spot ingredients, and rank
+          meals that use what you already have.
+        </p>
+
+        <label className="mt-8 inline-flex cursor-pointer items-center justify-center rounded-2xl bg-emerald-500 px-6 py-3.5 text-base font-bold text-zinc-950 shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-400 active:scale-[0.98]">
+          Scan ingredients
           <input
+            ref={fileInputRef}
             type="file"
             accept="image/*"
             capture="environment"
             className="hidden"
-            disabled={loading}
             onChange={handleImageUpload}
           />
         </label>
 
-        {error && (
-          <div
-            role="alert"
-            className="mt-8 bg-red-950/50 border border-red-800 text-red-200 px-5 py-4 rounded-2xl max-w-md"
-          >
-            {error}
+        {previewUrl && (
+          <div className="mt-8 overflow-hidden rounded-3xl border border-zinc-800/80 shadow-2xl shadow-black/30">
+            <img
+              src={previewUrl}
+              alt="Uploaded fridge or pantry"
+              className="max-h-80 w-full object-cover sm:max-h-96"
+            />
           </div>
         )}
 
-        {image && (
-          <img
-            src={image}
-            alt="Uploaded ingredients"
-            className="mt-10 rounded-3xl max-w-md w-full border border-zinc-800"
-          />
+        {loading && <LoadingScanner />}
+
+        {error && !loading && (
+          <ScanErrorCard message={error} onRetry={triggerRescan} />
         )}
 
-        {loading && (
-          <div className="mt-10 bg-zinc-900 p-6 rounded-3xl border border-zinc-800 max-w-md">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-4 h-4 rounded-full bg-green-400 animate-pulse" />
-              <p className="text-2xl font-semibold">
-                AI is analyzing your ingredients...
-              </p>
-            </div>
-
-            <p className="text-zinc-400">
-              Detecting foods and generating meal ideas.
-            </p>
-          </div>
-        )}
-
-        {showResults && (
-          <div className="mt-14">
-            <h2 className="text-3xl font-bold mb-5">Ingredients Detected</h2>
-
-            {detectedIngredients.length > 0 ? (
-              <div className="flex flex-wrap gap-3 mb-10">
-                {detectedIngredients.map((item) => (
-                  <div
-                    key={item}
-                    className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-2xl"
-                  >
-                    {item}
-                  </div>
-                ))}
+        {showResults && !loading && (
+          <div className="mt-12 space-y-10 animate-fade-in">
+            <section>
+              <div className="mb-4 flex items-end justify-between gap-4">
+                <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                  Ingredients detected
+                </h2>
+                <span className="shrink-0 text-sm text-zinc-500">
+                  {ingredients.length + possibleIngredients.length} items
+                </span>
               </div>
-            ) : (
-              <p className="text-zinc-400 mb-10">
-                No ingredients were detected. Try a clearer photo of your fridge
-                or pantry.
-              </p>
-            )}
+              <IngredientChips
+                ingredients={ingredients}
+                possibleIngredients={possibleIngredients}
+              />
+            </section>
 
-            <h2 className="text-3xl font-bold mb-5">Meal Ideas</h2>
-
-            {meals.length > 0 ? (
-              <div className="grid gap-4">
-                {meals.map((meal, index) => (
-                  <div
-                    key={`${meal.name}-${index}`}
-                    className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl"
-                  >
-                    <h3 className="text-2xl font-bold">{meal.name}</h3>
-                    <p className="text-zinc-400">{meal.time}</p>
-                    <p className="text-zinc-300 mt-3">{meal.description}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-zinc-400">
-                No meal ideas were generated. Try another photo with more
-                visible ingredients.
+            <section>
+              <h2 className="mb-2 text-2xl font-bold tracking-tight sm:text-3xl">
+                Meal ideas
+              </h2>
+              <p className="mb-6 text-sm text-zinc-400">
+                Ranked by how well they match your kitchen — best picks first.
               </p>
-            )}
+
+              {meals.length === 0 ? (
+                <p className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5 text-sm text-zinc-400">
+                  No meals generated this time. Try scanning again with more
+                  food visible.
+                </p>
+              ) : (
+                <div className="grid gap-4 sm:gap-5">
+                  {meals.map((meal, index) => (
+                    <MealCard key={`${meal.name}-${index}`} meal={meal} rank={index + 1} />
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={triggerRescan}
+                className="mt-8 w-full rounded-2xl border border-zinc-700 bg-zinc-900/50 py-3.5 text-sm font-semibold text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800/80 sm:w-auto sm:px-8"
+              >
+                Scan another photo
+              </button>
+            </section>
           </div>
         )}
       </section>

@@ -1,77 +1,39 @@
 import OpenAI from "openai";
+import { ANALYZE_VISION_PROMPT } from "@/lib/prompts/analyze";
+import { parseModelJson } from "@/lib/analysis/parse-json";
+import { normalizeAnalysisResponse } from "@/lib/analysis/normalize";
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const ALLOWED_IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-]);
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-function parseModelJson(text) {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1].trim() : trimmed;
-  return JSON.parse(candidate);
-}
-
-function normalizeAnalysis(data) {
-  const ingredients = Array.isArray(data?.ingredients)
-    ? data.ingredients.filter((item) => typeof item === "string" && item.trim())
-    : [];
-
-  const meals = Array.isArray(data?.meals)
-    ? data.meals
-        .filter(
-          (meal) =>
-            meal &&
-            typeof meal.name === "string" &&
-            typeof meal.time === "string" &&
-            typeof meal.description === "string"
-        )
-        .map((meal) => ({
-          name: meal.name.trim(),
-          time: meal.time.trim(),
-          description: meal.description.trim(),
-        }))
-    : [];
-
-  return { ingredients, meals };
-}
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 export async function POST(request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return Response.json(
-      { error: "OpenAI API key is not configured." },
-      { status: 500 }
-    );
-  }
-
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
   try {
-    const formData = await request.formData();
-    const image = formData.get("image");
-
-    if (!image || typeof image === "string") {
+    if (!process.env.OPENAI_API_KEY) {
       return Response.json(
-        { error: "No image uploaded." },
-        { status: 400 }
+        { error: "Scanning is temporarily unavailable. Please try again later." },
+        { status: 503 }
       );
     }
 
-    if (!ALLOWED_IMAGE_TYPES.has(image.type)) {
+    const formData = await request.formData();
+    const image = formData.get("image");
+
+    if (!image || typeof image.arrayBuffer !== "function") {
       return Response.json(
-        { error: "Please upload a JPEG, PNG, WebP, or GIF image." },
+        { error: "Please upload a photo of your fridge or pantry." },
         { status: 400 }
       );
     }
 
     if (image.size > MAX_IMAGE_BYTES) {
       return Response.json(
-        { error: "Image must be 10 MB or smaller." },
+        {
+          error:
+            "That photo is too large. Try a closer shot or allow the app to compress it and scan again.",
+        },
         { status: 400 }
       );
     }
@@ -79,6 +41,7 @@ export async function POST(request) {
     const bytes = await image.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64Image = buffer.toString("base64");
+    const mimeType = image.type || "image/jpeg";
 
     const response = await client.responses.create({
       model: "gpt-4.1-mini",
@@ -88,45 +51,30 @@ export async function POST(request) {
           content: [
             {
               type: "input_text",
-              text: `Look at this kitchen/fridge/pantry photo. Identify visible food ingredients only. Then suggest 3 realistic meals the user can make mostly from those ingredients.
-
-Return ONLY valid JSON in this exact format:
-{
-  "ingredients": ["ingredient 1", "ingredient 2"],
-  "meals": [
-    {
-      "name": "Meal name",
-      "time": "15 minutes",
-      "description": "Short description"
-    }
-  ]
-}`,
+              text: ANALYZE_VISION_PROMPT,
             },
             {
               type: "input_image",
-              image_url: `data:${image.type};base64,${base64Image}`,
+              image_url: `data:${mimeType};base64,${base64Image}`,
             },
           ],
         },
       ],
     });
 
-    const parsed = parseModelJson(response.output_text);
-    const data = normalizeAnalysis(parsed);
-
-    if (data.ingredients.length === 0 && data.meals.length === 0) {
-      return Response.json(
-        { error: "Could not detect ingredients or meals from this image." },
-        { status: 422 }
-      );
-    }
+    const text = response.output_text;
+    const parsed = parseModelJson(text);
+    const data = normalizeAnalysisResponse(parsed);
 
     return Response.json(data);
   } catch (error) {
-    console.error(error);
+    console.error("Analyze error:", error);
 
     return Response.json(
-      { error: "Failed to analyze image." },
+      {
+        error:
+          "We couldn't scan this photo. Try a brighter, closer shot with labels facing the camera.",
+      },
       { status: 500 }
     );
   }
