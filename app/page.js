@@ -1,119 +1,40 @@
 "use client";
 
-import { useRef, useState } from "react";
-
-function MatchBadge({ score }) {
-  const tier =
-    score >= 85
-      ? "match-badge match-badge--high"
-      : score >= 70
-        ? "match-badge match-badge--mid"
-        : "match-badge match-badge--low";
-
-  return (
-    <span className={tier} title="How well this meal fits your kitchen">
-      {score}% match
-    </span>
-  );
-}
-
-function DifficultyBadge({ difficulty }) {
-  const key = difficulty?.toLowerCase() || "medium";
-  return <span className={`difficulty-badge difficulty-badge--${key}`}>{difficulty}</span>;
-}
-
-function IngredientChip({ children, variant = "inventory" }) {
-  return <span className={`chip chip--${variant}`}>{children}</span>;
-}
-
-function ClockIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.75" />
-      <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function MealCard({ meal }) {
-  return (
-    <article className="meal-card">
-      <header className="meal-card__header">
-        <h3 className="meal-card__title">{meal.name}</h3>
-        <MatchBadge score={meal.matchScore} />
-      </header>
-
-      <div className="meal-card__meta">
-        <span className="meal-card__meta-item">
-          <ClockIcon />
-          {meal.cookTime}
-        </span>
-        <DifficultyBadge difficulty={meal.difficulty} />
-      </div>
-
-      <p className="meal-card__description">{meal.description}</p>
-
-      {meal.ingredientsUsed?.length > 0 && (
-        <section className="meal-card__section">
-          <h4 className="meal-card__section-title">Uses from your kitchen</h4>
-          <div className="meal-card__chips">
-            {meal.ingredientsUsed.map((item) => (
-              <IngredientChip key={item} variant="used">
-                {item}
-              </IngredientChip>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {meal.missingOptional?.length > 0 && (
-        <section className="meal-card__section">
-          <h4 className="meal-card__section-title">Nice to have</h4>
-          <div className="meal-card__chips">
-            {meal.missingOptional.map((item) => (
-              <IngredientChip key={item} variant="optional">
-                {item}
-              </IngredientChip>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {meal.steps?.length > 0 && (
-        <section className="meal-card__section">
-          <h4 className="meal-card__section-title">How to cook</h4>
-          <ol className="meal-card__steps">
-            {meal.steps.map((step, index) => (
-              <li key={`${meal.name}-step-${index}`}>
-                <span className="meal-card__step-num">{index + 1}</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-    </article>
-  );
-}
+import { useState } from "react";
 
 export default function Home() {
-  const fileInputRef = useRef(null);
-  const [scanFiles, setScanFiles] = useState([]);
-  const [previewUrls, setPreviewUrls] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [error, setError] = useState(null);
-
-  const [detectedIngredients, setDetectedIngredients] = useState([]);
+  const [images, setImages] = useState([]);
+  const [ingredients, setIngredients] = useState([]);
+  const [possibleIngredients, setPossibleIngredients] = useState([]);
   const [meals, setMeals] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const analyzeImages = async (files) => {
+  const handleUpload = async (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    const preview = URL.createObjectURL(file);
+
+    const updatedImages = [
+      ...images,
+      {
+        file,
+        preview,
+      },
+    ];
+
+    setImages(updatedImages);
+
     setLoading(true);
-    setShowResults(false);
-    setError(null);
+    setError("");
 
     const formData = new FormData();
-    files.forEach((file) => formData.append("images", file));
+
+    updatedImages.forEach((img) => {
+      formData.append("images", img.file);
+    });
 
     try {
       const response = await fetch("/api/analyze", {
@@ -124,170 +45,249 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "AI scan failed.");
+        throw new Error(data.error || "Scan failed");
       }
 
-      setDetectedIngredients(data.ingredients || []);
+      setIngredients(data.ingredients || []);
+      setPossibleIngredients(data.possibleIngredients || []);
       setMeals(data.meals || []);
-      setShowResults(true);
     } catch (err) {
-      console.error(err);
-      setError(err.message || "AI scan failed. Please try again.");
+      setError(err.message);
     } finally {
       setLoading(false);
+      event.target.value = "";
     }
   };
 
-  const handleImageUpload = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const nextFiles = [...scanFiles, file];
-    const nextPreviews = [...previewUrls, URL.createObjectURL(file)];
-
-    setScanFiles(nextFiles);
-    setPreviewUrls(nextPreviews);
-    event.target.value = "";
-
-    await analyzeImages(nextFiles);
-  };
-
-  const handleStartOver = () => {
-    previewUrls.forEach((url) => URL.revokeObjectURL(url));
-    setScanFiles([]);
-    setPreviewUrls([]);
-    setDetectedIngredients([]);
+  const clearKitchen = () => {
+    setImages([]);
+    setIngredients([]);
+    setPossibleIngredients([]);
     setMeals([]);
-    setShowResults(false);
-    setError(null);
-    setLoading(false);
+    setError("");
   };
-
-  const openFilePicker = () => {
-    fileInputRef.current?.click();
-  };
-
-  const hasScans = previewUrls.length > 0;
 
   return (
-    <main className="app-shell">
-      <div className="app-glow app-glow--left" aria-hidden="true" />
-      <div className="app-glow app-glow--right" aria-hidden="true" />
+    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-white px-5 py-10">
+      <section className="max-w-4xl mx-auto">
 
-      <section className="app-container">
-        <header className="hero">
-          <p className="hero__eyebrow">FridgeChef AI</p>
-          <h1 className="hero__title">Turn random ingredients into dinner.</h1>
-          <p className="hero__subtitle">
-            Scan your pantry, fridge, or kitchen—add more photos to build a fuller
-            inventory and get richer meal ideas.
+        <div className="mb-10">
+
+          <div className="inline-block bg-green-500/20 border border-green-500 text-green-300 px-4 py-2 rounded-full text-sm font-bold mb-5">
+            AI Pantry Scanner
+          </div>
+
+          <h1 className="text-5xl font-black mb-5 leading-tight">
+            FridgeChef AI
+          </h1>
+
+          <p className="text-zinc-300 text-xl leading-relaxed max-w-2xl">
+            Turn your fridge, pantry, and kitchen into personalized meals using AI.
           </p>
-        </header>
 
-        <div className="scan-actions">
-          {!hasScans ? (
-            <button type="button" className="btn btn--primary" onClick={openFilePicker}>
-              Scan ingredients
-            </button>
-          ) : (
-            <div className="scan-actions__row">
+        </div>
+
+        <div className="bg-zinc-900/70 border border-zinc-800 rounded-3xl p-6 mb-10 shadow-2xl">
+
+          <h2 className="text-2xl font-bold mb-3">
+            Kitchen scans
+          </h2>
+
+          <p className="text-zinc-400 mb-6">
+            Add multiple scans. Every photo stays saved and combines into one kitchen inventory.
+          </p>
+
+          <div className="flex gap-3 flex-wrap mb-6">
+
+            <label className="bg-green-500 hover:bg-green-400 text-black font-bold px-6 py-4 rounded-2xl cursor-pointer transition shadow-lg shadow-green-500/20">
+              {images.length === 0 ? "Scan kitchen" : "Add another scan"}
+
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleUpload}
+              />
+            </label>
+
+            {images.length > 0 && (
               <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={openFilePicker}
-                disabled={loading}
+                onClick={clearKitchen}
+                className="bg-red-500/20 border border-red-500 text-red-300 px-6 py-4 rounded-2xl font-bold"
               >
-                Add another scan
+                Clear kitchen
               </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={handleStartOver}
-                disabled={loading}
-              >
-                Start over
-              </button>
+            )}
+
+          </div>
+
+          {images.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+
+              {images.map((img, index) => (
+                <div
+                  key={index}
+                  className="bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden"
+                >
+
+                  <img
+                    src={img.preview}
+                    alt={`Scan ${index + 1}`}
+                    className="w-full h-40 object-cover"
+                  />
+
+                  <div className="p-3">
+
+                    <p className="font-bold text-zinc-300">
+                      Scan {index + 1}
+                    </p>
+
+                  </div>
+
+                </div>
+              ))}
+
             </div>
           )}
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={handleImageUpload}
-          />
         </div>
 
-        {hasScans && (
-          <div className="scan-gallery">
-            <p className="scan-gallery__label">
-              {previewUrls.length === 1
-                ? "1 scan"
-                : `${previewUrls.length} scans — combined kitchen inventory`}
-            </p>
-            <div className="scan-gallery__grid">
-              {previewUrls.map((url, index) => (
-                <figure key={url} className="scan-thumb">
-                  <img src={url} alt={`Kitchen scan ${index + 1}`} />
-                  <figcaption>Scan {index + 1}</figcaption>
-                </figure>
-              ))}
-            </div>
-          </div>
-        )}
-
         {loading && (
-          <div className="loading-panel" role="status" aria-live="polite">
-            <div className="loading-panel__pulse" />
-            <div>
-              <p className="loading-panel__title">Analyzing your kitchen…</p>
-              <p className="loading-panel__text">
-                {previewUrls.length > 1
-                  ? `Reviewing ${previewUrls.length} photos together and generating detailed meal ideas.`
-                  : "Detecting ingredients and crafting five realistic meal ideas."}
-              </p>
+          <div className="bg-green-500/10 border border-green-500 rounded-3xl p-6 mb-10">
+
+            <div className="flex items-center gap-4 mb-3">
+
+              <div className="w-4 h-4 rounded-full bg-green-400 animate-pulse"></div>
+
+              <h2 className="text-2xl font-bold">
+                Building your kitchen inventory...
+              </h2>
+
             </div>
+
+            <p className="text-zinc-300">
+              Combining scans, detecting ingredients, and generating meals.
+            </p>
+
           </div>
         )}
 
-        {error && !loading && (
-          <div className="error-banner" role="alert">
-            {error}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500 rounded-3xl p-6 mb-10">
+
+            <h2 className="text-2xl font-bold text-red-300 mb-2">
+              Scan failed
+            </h2>
+
+            <p className="text-red-200">
+              {error}
+            </p>
+
           </div>
         )}
 
-        {showResults && !loading && (
-          <div className="results">
-            <section className="inventory-panel">
-              <div className="section-heading">
-                <h2>Your kitchen inventory</h2>
-                <p>{detectedIngredients.length} ingredients detected</p>
-              </div>
-              <div className="inventory-panel__chips">
-                {detectedIngredients.map((item) => (
-                  <IngredientChip key={item} variant="inventory">
-                    {item}
-                  </IngredientChip>
-                ))}
-              </div>
-            </section>
+        {ingredients.length > 0 && (
+          <div className="mb-12">
 
-            <section className="meals-section">
-              <div className="section-heading">
-                <h2>Meal ideas</h2>
-                <p>Five realistic recipes matched to what you have</p>
-              </div>
+            <h2 className="text-4xl font-black mb-5">
+              Confirmed ingredients
+            </h2>
 
-              <div className="meals-grid">
-                {meals.map((meal) => (
-                  <MealCard key={meal.name} meal={meal} />
-                ))}
-              </div>
-            </section>
+            <div className="flex flex-wrap gap-3">
+
+              {ingredients.map((item) => (
+                <div
+                  key={item}
+                  className="bg-green-500/15 border border-green-500 text-green-200 px-4 py-3 rounded-full"
+                >
+                  {item}
+                </div>
+              ))}
+
+            </div>
+
           </div>
         )}
+
+        {possibleIngredients.length > 0 && (
+          <div className="mb-12">
+
+            <h2 className="text-4xl font-black mb-5 text-yellow-300">
+              Possible ingredients
+            </h2>
+
+            <div className="flex flex-wrap gap-3">
+
+              {possibleIngredients.map((item) => (
+                <div
+                  key={item}
+                  className="bg-yellow-500/10 border border-yellow-500 text-yellow-100 px-4 py-3 rounded-full"
+                >
+                  {item}
+                </div>
+              ))}
+
+            </div>
+
+          </div>
+        )}
+
+        {meals.length > 0 && (
+          <div>
+
+            <h2 className="text-5xl font-black mb-6">
+              Meal ideas
+            </h2>
+
+            <div className="space-y-6">
+
+              {meals.map((meal, index) => (
+                <div
+                  key={meal.name}
+                  className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-3xl p-7 shadow-2xl"
+                >
+
+                  <div className="flex justify-between items-center mb-5">
+
+                    <div className="bg-green-500/15 border border-green-500 text-green-300 px-4 py-2 rounded-full font-bold">
+                      {meal.matchScore || 90}% Match
+                    </div>
+
+                    <div className="text-zinc-500 font-bold">
+                      #{index + 1}
+                    </div>
+
+                  </div>
+
+                  <h3 className="text-3xl font-black mb-4">
+                    {meal.name}
+                  </h3>
+
+                  <p className="text-zinc-300 text-lg mb-5 leading-relaxed">
+                    {meal.description}
+                  </p>
+
+                  <div className="flex gap-3 flex-wrap mb-5">
+
+                    <div className="bg-zinc-800 px-4 py-2 rounded-xl">
+                      ⏱ {meal.cookTime}
+                    </div>
+
+                    <div className="bg-orange-500/15 border border-orange-500 text-orange-200 px-4 py-2 rounded-xl">
+                      {meal.difficulty}
+                    </div>
+
+                  </div>
+
+                </div>
+              ))}
+
+            </div>
+
+          </div>
+        )}
+
       </section>
     </main>
   );
