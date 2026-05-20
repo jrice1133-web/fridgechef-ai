@@ -1,29 +1,119 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+function MatchBadge({ score }) {
+  const tier =
+    score >= 85
+      ? "match-badge match-badge--high"
+      : score >= 70
+        ? "match-badge match-badge--mid"
+        : "match-badge match-badge--low";
+
+  return (
+    <span className={tier} title="How well this meal fits your kitchen">
+      {score}% match
+    </span>
+  );
+}
+
+function DifficultyBadge({ difficulty }) {
+  const key = difficulty?.toLowerCase() || "medium";
+  return <span className={`difficulty-badge difficulty-badge--${key}`}>{difficulty}</span>;
+}
+
+function IngredientChip({ children, variant = "inventory" }) {
+  return <span className={`chip chip--${variant}`}>{children}</span>;
+}
+
+function ClockIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.75" />
+      <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MealCard({ meal }) {
+  return (
+    <article className="meal-card">
+      <header className="meal-card__header">
+        <h3 className="meal-card__title">{meal.name}</h3>
+        <MatchBadge score={meal.matchScore} />
+      </header>
+
+      <div className="meal-card__meta">
+        <span className="meal-card__meta-item">
+          <ClockIcon />
+          {meal.cookTime}
+        </span>
+        <DifficultyBadge difficulty={meal.difficulty} />
+      </div>
+
+      <p className="meal-card__description">{meal.description}</p>
+
+      {meal.ingredientsUsed?.length > 0 && (
+        <section className="meal-card__section">
+          <h4 className="meal-card__section-title">Uses from your kitchen</h4>
+          <div className="meal-card__chips">
+            {meal.ingredientsUsed.map((item) => (
+              <IngredientChip key={item} variant="used">
+                {item}
+              </IngredientChip>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {meal.missingOptional?.length > 0 && (
+        <section className="meal-card__section">
+          <h4 className="meal-card__section-title">Nice to have</h4>
+          <div className="meal-card__chips">
+            {meal.missingOptional.map((item) => (
+              <IngredientChip key={item} variant="optional">
+                {item}
+              </IngredientChip>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {meal.steps?.length > 0 && (
+        <section className="meal-card__section">
+          <h4 className="meal-card__section-title">How to cook</h4>
+          <ol className="meal-card__steps">
+            {meal.steps.map((step, index) => (
+              <li key={`${meal.name}-step-${index}`}>
+                <span className="meal-card__step-num">{index + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </article>
+  );
+}
 
 export default function Home() {
-  const [previews, setPreviews] = useState([]);
+  const fileInputRef = useRef(null);
+  const [scanFiles, setScanFiles] = useState([]);
+  const [previewUrls, setPreviewUrls] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [error, setError] = useState(null);
 
   const [detectedIngredients, setDetectedIngredients] = useState([]);
-  const [possibleIngredients, setPossibleIngredients] = useState([]);
   const [meals, setMeals] = useState([]);
 
-  const handleImageUpload = async (event) => {
-    const files = Array.from(event.target.files || []);
-
-    if (files.length === 0) return;
-
-    setPreviews(files.map((file) => URL.createObjectURL(file)));
+  const analyzeImages = async (files) => {
     setLoading(true);
     setShowResults(false);
+    setError(null);
 
     const formData = new FormData();
-    for (const file of files) {
-      formData.append("images", file);
-    }
+    files.forEach((file) => formData.append("images", file));
 
     try {
       const response = await fetch("/api/analyze", {
@@ -34,151 +124,168 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Scan failed");
+        throw new Error(data.error || "AI scan failed.");
       }
 
       setDetectedIngredients(data.ingredients || []);
-      setPossibleIngredients(data.possibleIngredients || []);
       setMeals(data.meals || []);
-
-      setLoading(false);
       setShowResults(true);
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "AI scan failed. Please try again.");
+    } finally {
       setLoading(false);
-      alert(error.message || "AI scan failed.");
     }
   };
 
+  const handleImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const nextFiles = [...scanFiles, file];
+    const nextPreviews = [...previewUrls, URL.createObjectURL(file)];
+
+    setScanFiles(nextFiles);
+    setPreviewUrls(nextPreviews);
+    event.target.value = "";
+
+    await analyzeImages(nextFiles);
+  };
+
+  const handleStartOver = () => {
+    previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    setScanFiles([]);
+    setPreviewUrls([]);
+    setDetectedIngredients([]);
+    setMeals([]);
+    setShowResults(false);
+    setError(null);
+    setLoading(false);
+  };
+
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const hasScans = previewUrls.length > 0;
+
   return (
-    <main className="min-h-screen bg-zinc-950 text-white px-6 py-16">
-      <section className="max-w-5xl mx-auto">
-        <p className="text-green-400 font-semibold mb-4">AI Cooking Assistant</p>
+    <main className="app-shell">
+      <div className="app-glow app-glow--left" aria-hidden="true" />
+      <div className="app-glow app-glow--right" aria-hidden="true" />
 
-        <h1 className="text-5xl font-bold mb-6">
-          Turn random ingredients into dinner.
-        </h1>
+      <section className="app-container">
+        <header className="hero">
+          <p className="hero__eyebrow">FridgeChef AI</p>
+          <h1 className="hero__title">Turn random ingredients into dinner.</h1>
+          <p className="hero__subtitle">
+            Scan your pantry, fridge, or kitchen—add more photos to build a fuller
+            inventory and get richer meal ideas.
+          </p>
+        </header>
 
-        <p className="text-zinc-400 text-xl mb-8">
-          Scan your pantry, fridge, or kitchen and get AI-generated meal ideas
-          instantly.
-        </p>
+        <div className="scan-actions">
+          {!hasScans ? (
+            <button type="button" className="btn btn--primary" onClick={openFilePicker}>
+              Scan ingredients
+            </button>
+          ) : (
+            <div className="scan-actions__row">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={openFilePicker}
+                disabled={loading}
+              >
+                Add another scan
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={handleStartOver}
+                disabled={loading}
+              >
+                Start over
+              </button>
+            </div>
+          )}
 
-        <label className="bg-green-500 text-black font-bold px-6 py-4 rounded-2xl inline-block cursor-pointer hover:bg-green-400 transition">
-          Scan Ingredients
           <input
+            ref={fileInputRef}
             type="file"
             accept="image/*"
             capture="environment"
-            multiple
-            className="hidden"
+            className="sr-only"
             onChange={handleImageUpload}
           />
-        </label>
+        </div>
 
-        {previews.length > 0 && (
-          <div className="mt-10 flex flex-wrap gap-4">
-            {previews.map((src) => (
-              <img
-                key={src}
-                src={src}
-                alt="Uploaded ingredients"
-                className="rounded-3xl max-w-xs w-full border border-zinc-800"
-              />
-            ))}
+        {hasScans && (
+          <div className="scan-gallery">
+            <p className="scan-gallery__label">
+              {previewUrls.length === 1
+                ? "1 scan"
+                : `${previewUrls.length} scans — combined kitchen inventory`}
+            </p>
+            <div className="scan-gallery__grid">
+              {previewUrls.map((url, index) => (
+                <figure key={url} className="scan-thumb">
+                  <img src={url} alt={`Kitchen scan ${index + 1}`} />
+                  <figcaption>Scan {index + 1}</figcaption>
+                </figure>
+              ))}
+            </div>
           </div>
         )}
 
         {loading && (
-          <div className="mt-10 bg-zinc-900 p-6 rounded-3xl border border-zinc-800 max-w-md">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-4 h-4 rounded-full bg-green-400 animate-pulse" />
-              <p className="text-2xl font-semibold">
-                AI is analyzing your ingredients...
+          <div className="loading-panel" role="status" aria-live="polite">
+            <div className="loading-panel__pulse" />
+            <div>
+              <p className="loading-panel__title">Analyzing your kitchen…</p>
+              <p className="loading-panel__text">
+                {previewUrls.length > 1
+                  ? `Reviewing ${previewUrls.length} photos together and generating detailed meal ideas.`
+                  : "Detecting ingredients and crafting five realistic meal ideas."}
               </p>
             </div>
-            <p className="text-zinc-400">
-              Detecting foods and generating meal ideas.
-            </p>
           </div>
         )}
 
-        {showResults && (
-          <div className="mt-14">
-            <h2 className="text-3xl font-bold mb-5">Ingredients Detected</h2>
+        {error && !loading && (
+          <div className="error-banner" role="alert">
+            {error}
+          </div>
+        )}
 
-            <div className="flex flex-wrap gap-3 mb-10">
-              {detectedIngredients.map((item) => (
-                <div
-                  key={item}
-                  className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-2xl"
-                >
-                  {item}
-                </div>
-              ))}
-            </div>
+        {showResults && !loading && (
+          <div className="results">
+            <section className="inventory-panel">
+              <div className="section-heading">
+                <h2>Your kitchen inventory</h2>
+                <p>{detectedIngredients.length} ingredients detected</p>
+              </div>
+              <div className="inventory-panel__chips">
+                {detectedIngredients.map((item) => (
+                  <IngredientChip key={item} variant="inventory">
+                    {item}
+                  </IngredientChip>
+                ))}
+              </div>
+            </section>
 
-            {possibleIngredients.length > 0 && (
-              <>
-                <h2 className="text-3xl font-bold mb-5">Possibly Detected</h2>
-                <div className="flex flex-wrap gap-3 mb-10">
-                  {possibleIngredients.map((item) => (
-                    <div
-                      key={item}
-                      className="bg-zinc-900/60 border border-zinc-700 border-dashed px-4 py-3 rounded-2xl text-zinc-400"
-                    >
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+            <section className="meals-section">
+              <div className="section-heading">
+                <h2>Meal ideas</h2>
+                <p>Five realistic recipes matched to what you have</p>
+              </div>
 
-            <h2 className="text-3xl font-bold mb-5">Meal Ideas</h2>
-
-            <div className="grid gap-4">
-              {meals.map((meal) => (
-                <div
-                  key={meal.name}
-                  className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl"
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="text-2xl font-bold">{meal.name}</h3>
-                    {meal.matchScore != null && (
-                      <span className="text-green-400 font-semibold">
-                        {meal.matchScore}% match
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-zinc-400 mt-1">
-                    {[meal.cookTime, meal.difficulty].filter(Boolean).join(" · ")}
-                  </p>
-
-                  <p className="text-zinc-300 mt-3">{meal.description}</p>
-
-                  {meal.ingredientsUsed?.length > 0 && (
-                    <p className="text-zinc-500 text-sm mt-3">
-                      Uses: {meal.ingredientsUsed.join(", ")}
-                    </p>
-                  )}
-
-                  {meal.missingOptional?.length > 0 && (
-                    <p className="text-zinc-500 text-sm mt-1">
-                      Optional: {meal.missingOptional.join(", ")}
-                    </p>
-                  )}
-
-                  {meal.steps?.length > 0 && (
-                    <ol className="mt-4 space-y-2 text-zinc-300 list-decimal list-inside">
-                      {meal.steps.map((step, i) => (
-                        <li key={i}>{step}</li>
-                      ))}
-                    </ol>
-                  )}
-                </div>
-              ))}
-            </div>
+              <div className="meals-grid">
+                {meals.map((meal) => (
+                  <MealCard key={meal.name} meal={meal} />
+                ))}
+              </div>
+            </section>
           </div>
         )}
       </section>
